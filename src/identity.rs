@@ -5,7 +5,7 @@ use std::fs;
 use std::path::Path;
 
 /// Parsed identity from a holon.yaml file.
-#[derive(Debug, Clone, Deserialize, Default)]
+#[derive(Debug, Clone, Deserialize, Default, PartialEq, Eq)]
 pub struct HolonIdentity {
     #[serde(default)]
     pub uuid: String,
@@ -35,6 +35,24 @@ pub struct HolonIdentity {
     pub proto_status: String,
     #[serde(default)]
     pub aliases: Vec<String>,
+}
+
+impl HolonIdentity {
+    /// Return the canonical slug derived from the holon's identity.
+    pub fn slug(&self) -> String {
+        let given = self.given_name.trim();
+        let family = self.family_name.trim().trim_end_matches('?');
+        if given.is_empty() && family.is_empty() {
+            return String::new();
+        }
+
+        format!("{given}-{family}")
+            .trim()
+            .to_lowercase()
+            .replace(' ', "-")
+            .trim_matches('-')
+            .to_string()
+    }
 }
 
 /// Parse a holon.yaml file and return its identity.

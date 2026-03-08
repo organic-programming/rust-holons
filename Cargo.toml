@@ -9,11 +9,18 @@ authors = ["B. ALTER"]
 [dependencies]
 tokio = { version = "1", features = ["full"] }
 tonic = "0.12"
+prost = "0.13"
+regex = "1"
 serde = { version = "1", features = ["derive"] }
 serde_yaml = "0.9"
 libc = "0.2"
 tower-service = "0.3"
 hyper-util = { version = "0.1", features = ["tokio"] }
 
+[build-dependencies]
+tonic-build = "0.12"
+
 [dev-dependencies]
 tokio = { version = "1", features = ["full", "test-util"] }
+tempfile = "3"
+tokio-stream = { version = "0.1", features = ["net"] }

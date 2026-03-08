@@ -38,7 +38,7 @@ impl Default for ConnectOptions {
     fn default() -> Self {
         Self {
             timeout: DEFAULT_TIMEOUT,
-            transport: "tcp".to_string(),
+            transport: "stdio".to_string(),
             start: true,
             port_file: None,
         }
@@ -102,20 +102,22 @@ async fn connect_with_mode(
     if opts.timeout.is_zero() {
         opts.timeout = DEFAULT_TIMEOUT;
     }
-    if opts.transport.trim().is_empty() {
-        opts.transport = "tcp".to_string();
+
+    if is_direct_target(trimmed) {
+        return connect_direct(trimmed, opts.timeout, None).await;
     }
 
-    let transport = opts.transport.trim().to_lowercase();
+    let transport = if opts.transport.trim().is_empty() {
+        ConnectOptions::default().transport
+    } else {
+        opts.transport.trim().to_string()
+    }
+    .to_lowercase();
     match transport.as_str() {
         "tcp" => {}
         "stdio" if ephemeral => {}
         "stdio" => return Err(boxed_err("stdio transport only supports connect()")),
         other => return Err(boxed_err(format!("unsupported transport {other:?}"))),
-    }
-
-    if is_direct_target(trimmed) {
-        return connect_direct(trimmed, opts.timeout, None).await;
     }
 
     let entry = discover::find_by_slug(trimmed)?
@@ -205,7 +207,7 @@ async fn connect_direct(
     owner: Option<Arc<ProcessOwner>>,
 ) -> Result<Channel> {
     let normalized = normalize_direct_target(target)?;
-        let endpoint = Endpoint::from_shared(normalized.endpoint_uri)?
+    let endpoint = Endpoint::from_shared(normalized.endpoint_uri)?
         .connect_timeout(timeout)
         .timeout(timeout);
 
@@ -780,7 +782,28 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_connect_slug_starts_binary_and_disconnect_stops_it() {
+    async fn test_connect_slug_uses_stdio_by_default() {
+        let _lock = acquire_process_guard().await;
+        let _state = ProcessStateGuard::capture();
+        let root = temp_dir("connect-rust-stdio");
+        let slug = unique_slug("stdio");
+        let marker = root.join("started.log");
+        let listen_log = root.join("listen.log");
+        let wrapper = write_stdio_wrapper_script(&root, &marker, &listen_log);
+
+        write_holon(&root.join("holons/stdio"), &slug, &wrapper);
+        env::set_current_dir(&root).unwrap();
+
+        let channel = connect(&slug).await.unwrap();
+        wait_for_file(&marker).await.unwrap();
+        assert_eq!(wait_for_file(&listen_log).await.unwrap().trim(), "stdio://");
+        assert!(!default_port_file_path(&slug).exists());
+
+        disconnect(channel).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_connect_slug_tcp_override_starts_binary_and_disconnect_stops_it() {
         let _lock = acquire_process_guard().await;
         let _state = ProcessStateGuard::capture();
         let root = temp_dir("connect-rust-slug");
@@ -792,7 +815,9 @@ mod tests {
         write_holon(&root.join("holons/slug"), &slug, &wrapper);
         env::set_current_dir(&root).unwrap();
 
-        let channel = connect(&slug).await.unwrap();
+        let channel = connect_with_mode(&slug, tcp_connect_options(), true)
+            .await
+            .unwrap();
         assert!(marker.is_file());
         wait_for_tcp_open(fixed_port).await.unwrap();
 
@@ -801,7 +826,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_connect_slug_reuses_live_port_file() {
+    async fn test_connect_slug_tcp_override_reuses_live_port_file() {
         let _lock = acquire_process_guard().await;
         let _state = ProcessStateGuard::capture();
         let root = temp_dir("connect-rust-reuse");
@@ -818,7 +843,9 @@ mod tests {
         let mut server = start_server_process(&server_bin, &listen_uri).await;
         write_port_file(&default_port_file_path(&slug), &listen_uri).unwrap();
 
-        let channel = connect(&slug).await.unwrap();
+        let channel = connect_with_mode(&slug, tcp_connect_options(), true)
+            .await
+            .unwrap();
         disconnect(channel).await.unwrap();
 
         assert!(!marker.exists());
@@ -827,7 +854,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_connect_slug_cleans_stale_port_file_and_starts_fresh() {
+    async fn test_connect_slug_tcp_override_cleans_stale_port_file_and_starts_fresh() {
         let _lock = acquire_process_guard().await;
         let _state = ProcessStateGuard::capture();
         let root = temp_dir("connect-rust-stale");
@@ -844,7 +871,9 @@ mod tests {
         let port_file = default_port_file_path(&slug);
         write_port_file(&port_file, &stale_uri).unwrap();
 
-        let channel = connect(&slug).await.unwrap();
+        let channel = connect_with_mode(&slug, tcp_connect_options(), true)
+            .await
+            .unwrap();
         assert!(marker.is_file());
         assert!(!port_file.exists());
         wait_for_tcp_open(fixed_port).await.unwrap();
@@ -916,6 +945,29 @@ mod tests {
         wrapper
     }
 
+    fn write_stdio_wrapper_script(root: &Path, marker: &Path, listen_log: &Path) -> PathBuf {
+        let wrapper = root.join("echo-server-stdio-wrapper");
+        let real_bin = sdk_root().join("bin/echo-server");
+        let script = format!(
+            "#!/usr/bin/env bash\nset -euo pipefail\nprintf 'started\\n' >> '{}'\nlisten=''\nargs=()\nwhile (($#)); do\n  if [[ \"$1\" == \"--listen\" && $# -ge 2 ]]; then\n    listen=\"$2\"\n  fi\n  args+=(\"$1\")\n  shift\ndone\nprintf '%s\\n' \"$listen\" > '{}'\nexec \"{}\" \"${{args[@]}}\"\n",
+            marker.display(),
+            listen_log.display(),
+            real_bin.display()
+        );
+        fs::write(&wrapper, script).unwrap();
+        let mut perms = fs::metadata(&wrapper).unwrap().permissions();
+        perms.set_mode(0o755);
+        fs::set_permissions(&wrapper, perms).unwrap();
+        wrapper
+    }
+
+    fn tcp_connect_options() -> ConnectOptions {
+        ConnectOptions {
+            transport: "tcp".to_string(),
+            ..ConnectOptions::default()
+        }
+    }
+
     async fn start_server_process(binary: &Path, listen_uri: &str) -> Child {
         let mut command = Command::new(binary);
         #[cfg(unix)]
@@ -947,6 +999,20 @@ mod tests {
                 Err(err) if Instant::now() < deadline => {
                     let _ = err;
                     time::sleep(Duration::from_millis(50)).await;
+                }
+                Err(err) => return Err(err.into()),
+            }
+        }
+    }
+
+    async fn wait_for_file(path: &Path) -> Result<String> {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            match fs::read_to_string(path) {
+                Ok(contents) => return Ok(contents),
+                Err(err) if Instant::now() < deadline => {
+                    let _ = err;
+                    time::sleep(Duration::from_millis(25)).await;
                 }
                 Err(err) => return Err(err.into()),
             }

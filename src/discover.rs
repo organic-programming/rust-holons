@@ -385,7 +385,7 @@ fn cache_dir() -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::{Mutex, OnceLock};
+    use crate::test_support::{acquire_process_guard_blocking, ProcessStateGuard};
     use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
@@ -441,7 +441,7 @@ mod tests {
 
     #[test]
     fn test_discover_all_prefers_local_root() {
-        let _lock = test_guard().lock().unwrap();
+        let _lock = acquire_process_guard_blocking();
         let _state = ProcessStateGuard::capture();
 
         let root = temp_dir("discover-all-rust");
@@ -474,7 +474,7 @@ mod tests {
 
     #[test]
     fn test_find_by_slug_and_uuid() {
-        let _lock = test_guard().lock().unwrap();
+        let _lock = acquire_process_guard_blocking();
         let _state = ProcessStateGuard::capture();
 
         let root = temp_dir("find-rust");
@@ -504,11 +504,6 @@ mod tests {
         assert!(find_by_slug("missing").unwrap().is_none());
 
         let _ = fs::remove_dir_all(root);
-    }
-
-    fn test_guard() -> &'static Mutex<()> {
-        static GUARD: OnceLock<Mutex<()>> = OnceLock::new();
-        GUARD.get_or_init(|| Mutex::new(()))
     }
 
     fn temp_dir(prefix: &str) -> PathBuf {
@@ -547,36 +542,6 @@ mod tests {
                 given_name: given_name.to_string(),
                 family_name: family_name.to_string(),
                 binary: binary.to_string(),
-            }
-        }
-    }
-
-    struct ProcessStateGuard {
-        cwd: PathBuf,
-        oppath: Option<String>,
-        opbin: Option<String>,
-    }
-
-    impl ProcessStateGuard {
-        fn capture() -> Self {
-            Self {
-                cwd: env::current_dir().unwrap(),
-                oppath: env::var("OPPATH").ok(),
-                opbin: env::var("OPBIN").ok(),
-            }
-        }
-    }
-
-    impl Drop for ProcessStateGuard {
-        fn drop(&mut self) {
-            let _ = env::set_current_dir(&self.cwd);
-            match &self.oppath {
-                Some(value) => env::set_var("OPPATH", value),
-                None => env::remove_var("OPPATH"),
-            }
-            match &self.opbin {
-                Some(value) => env::set_var("OPBIN", value),
-                None => env::remove_var("OPBIN"),
             }
         }
     }

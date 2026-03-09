@@ -16,6 +16,7 @@ serde_yaml = "0.9"
 libc = "0.2"
 tower-service = "0.3"
 hyper-util = { version = "0.1", features = ["tokio"] }
+tokio-stream = { version = "0.1", features = ["net"] }
 
 [build-dependencies]
 tonic-build = "0.12"

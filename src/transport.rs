@@ -14,7 +14,10 @@ use std::net::SocketAddr;
 use std::task::{Context, Poll};
 
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf, Stdin, Stdout};
+#[cfg(unix)]
 use tokio::net::{TcpListener, TcpStream, UnixListener, UnixStream};
+#[cfg(not(unix))]
+use tokio::net::{TcpListener, TcpStream};
 
 /// Default transport URI when --listen is omitted.
 pub const DEFAULT_URI: &str = "tcp://:9090";
@@ -33,6 +36,7 @@ pub struct ParsedURI {
 /// Listener variants returned by [`listen`].
 pub enum Listener {
     Tcp(TcpListener),
+    #[cfg(unix)]
     Unix(UnixListener),
     Stdio,
     Mem(MemListener),
@@ -111,12 +115,7 @@ pub async fn listen(uri: &str) -> io::Result<Listener> {
             let lis = TcpListener::bind(format!("{}:{}", host, port)).await?;
             Ok(Listener::Tcp(lis))
         }
-        "unix" => {
-            let path = parsed.path.unwrap_or_default();
-            let _ = std::fs::remove_file(&path);
-            let lis = UnixListener::bind(path)?;
-            Ok(Listener::Unix(lis))
-        }
+        "unix" => listen_unix(parsed.path.unwrap_or_default()),
         "stdio" => Ok(Listener::Stdio),
         "mem" => Ok(Listener::Mem(MemListener::new())),
         "ws" | "wss" => Ok(Listener::Ws(WSListener {
@@ -130,6 +129,21 @@ pub async fn listen(uri: &str) -> io::Result<Listener> {
             format!("unsupported transport URI: {uri:?}"),
         )),
     }
+}
+
+#[cfg(unix)]
+fn listen_unix(path: String) -> io::Result<Listener> {
+    let _ = std::fs::remove_file(&path);
+    let lis = UnixListener::bind(path)?;
+    Ok(Listener::Unix(lis))
+}
+
+#[cfg(not(unix))]
+fn listen_unix(_path: String) -> io::Result<Listener> {
+    Err(io::Error::new(
+        io::ErrorKind::Unsupported,
+        "unix:// transport is only supported on unix platforms",
+    ))
 }
 
 /// Create a stdio transport that can be passed to async gRPC adapters.
@@ -152,6 +166,7 @@ pub async fn dial_tcp(uri: &str) -> io::Result<TcpStream> {
 }
 
 /// Dial a remote Unix-domain listener from a `unix://` URI.
+#[cfg(unix)]
 pub async fn dial_unix(uri: &str) -> io::Result<UnixStream> {
     let parsed = parse_uri(uri).map_err(|err| io::Error::new(io::ErrorKind::InvalidInput, err))?;
     if parsed.scheme != "unix" {
@@ -168,6 +183,16 @@ pub async fn dial_unix(uri: &str) -> io::Result<UnixStream> {
         ));
     }
     UnixStream::connect(path).await
+}
+
+/// Dial a remote Unix-domain listener from a `unix://` URI.
+#[cfg(not(unix))]
+pub async fn dial_unix(uri: &str) -> io::Result<()> {
+    let _ = uri;
+    Err(io::Error::new(
+        io::ErrorKind::Unsupported,
+        "dial_unix is only supported on unix platforms",
+    ))
 }
 
 /// Extract the transport scheme from a URI.
@@ -328,6 +353,7 @@ fn split_host_port(value: &str, default_port: u16) -> Result<(String, u16), Stri
 #[cfg(test)]
 mod tests {
     use std::io;
+    #[cfg(unix)]
     use std::time::{Duration, SystemTime, UNIX_EPOCH};
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
@@ -374,6 +400,7 @@ mod tests {
         }
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn test_unix_listen() {
         let path = "/tmp/holons_test_rust.sock";
@@ -383,6 +410,7 @@ mod tests {
             Err(err) => panic!("unix listen failed: {err}"),
         };
         match lis {
+            #[cfg(unix)]
             Listener::Unix(_) => {}
             _ => panic!("expected Unix listener"),
         }
@@ -460,6 +488,7 @@ mod tests {
         server.await.unwrap();
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn test_unix_dial_roundtrip() {
         let path = std::env::temp_dir().join(format!(
@@ -478,6 +507,7 @@ mod tests {
             Err(err) => panic!("unix listen failed: {err}"),
         };
         let unix = match lis {
+            #[cfg(unix)]
             Listener::Unix(l) => l,
             _ => panic!("expected Unix listener"),
         };

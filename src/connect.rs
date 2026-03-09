@@ -696,30 +696,35 @@ async fn stop_child(child: &mut Child) -> Result<()> {
     Ok(())
 }
 
+#[cfg(unix)]
 fn send_sigterm(pid: u32) -> Result<()> {
     send_signal(pid, libc::SIGTERM)
 }
 
+#[cfg(not(unix))]
+fn send_sigterm(pid: u32) -> Result<()> {
+    let _ = pid;
+    Ok(())
+}
+
+#[cfg(unix)]
 fn send_sigkill(pid: u32) -> Result<()> {
     send_signal(pid, libc::SIGKILL)
 }
 
-fn send_signal(pid: u32, signal: i32) -> Result<()> {
-    #[cfg(unix)]
-    {
-        let status = unsafe { libc::kill(-(pid as i32), signal) };
-        if status == 0 || std::io::Error::last_os_error().raw_os_error() == Some(libc::ESRCH) {
-            return Ok(());
-        }
-        Err(std::io::Error::last_os_error().into())
-    }
+#[cfg(not(unix))]
+fn send_sigkill(pid: u32) -> Result<()> {
+    let _ = pid;
+    Ok(())
+}
 
-    #[cfg(not(unix))]
-    {
-        let _ = pid;
-        let _ = signal;
-        Ok(())
+#[cfg(unix)]
+fn send_signal(pid: u32, signal: i32) -> Result<()> {
+    let status = unsafe { libc::kill(-(pid as i32), signal) };
+    if status == 0 || std::io::Error::last_os_error().raw_os_error() == Some(libc::ESRCH) {
+        return Ok(());
     }
+    Err(std::io::Error::last_os_error().into())
 }
 
 fn file_name(path: &str) -> Result<&OsStr> {
@@ -757,7 +762,7 @@ struct DirectTarget {
     endpoint_uri: String,
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
     use crate::test_support::{acquire_process_guard, ProcessStateGuard};

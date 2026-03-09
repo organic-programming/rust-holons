@@ -3,9 +3,12 @@
 use crate::transport::{self, Listener, StdioTransport, DEFAULT_URI};
 use std::convert::Infallible;
 use std::error::Error;
+#[cfg(unix)]
 use std::path::PathBuf;
 use tokio::io::{AsyncRead, AsyncWrite};
-use tokio_stream::wrappers::{TcpListenerStream, UnixListenerStream};
+use tokio_stream::wrappers::TcpListenerStream;
+#[cfg(unix)]
+use tokio_stream::wrappers::UnixListenerStream;
 use tonic::body::BoxBody;
 use tonic::codegen::http::{Request, Response};
 use tonic::server::NamedService;
@@ -37,6 +40,7 @@ macro_rules! serve_router {
                     )
                     .await?;
             }
+            #[cfg(unix)]
             Listener::Unix(listener) => {
                 let cleanup = unix_socket_path(listen_uri)?;
                 announce_bound_uri(listen_uri, options);
@@ -189,11 +193,13 @@ fn bound_tcp_uri(listen_uri: &str, listener: &tokio::net::TcpListener) -> Result
     Ok(format!("tcp://{host}:{}", bound.port()))
 }
 
+#[cfg(unix)]
 fn unix_socket_path(listen_uri: &str) -> Result<Option<PathBuf>> {
     let parsed = transport::parse_uri(listen_uri).map_err(boxed_err)?;
     Ok(parsed.path.map(PathBuf::from))
 }
 
+#[cfg(unix)]
 fn cleanup_unix_socket(path: Option<&std::path::Path>) {
     if let Some(path) = path {
         let _ = std::fs::remove_file(path);
@@ -263,9 +269,10 @@ mod tests {
         assert!(actual.starts_with("tcp://127.0.0.1:"));
     }
 
+    #[cfg(unix)]
     #[test]
     fn test_unix_socket_path() {
         let path = unix_socket_path("unix:///tmp/holons.sock").unwrap();
-        assert_eq!(path.unwrap(), PathBuf::from("/tmp/holons.sock"));
+        assert_eq!(path.unwrap(), std::path::PathBuf::from("/tmp/holons.sock"));
     }
 }

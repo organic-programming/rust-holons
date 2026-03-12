@@ -1,6 +1,7 @@
 //! Resolve holons by slug or direct target and return ready gRPC channels.
 
 use crate::discover::{self, HolonEntry};
+use hyper_util::rt::TokioIo;
 use std::collections::HashMap;
 use std::env;
 use std::error::Error;
@@ -13,7 +14,6 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::task::{Context, Poll};
 use std::time::Duration;
-use hyper_util::rt::TokioIo;
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, ReadBuf};
 use tokio::net::TcpStream;
 use tokio::process::{Child, ChildStdin, ChildStdout, Command};
@@ -368,10 +368,7 @@ impl AsyncWrite for ChildStdioTransport {
         Pin::new(&mut self.writer).poll_flush(cx)
     }
 
-    fn poll_shutdown(
-        mut self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-    ) -> Poll<std::io::Result<()>> {
+    fn poll_shutdown(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
         Pin::new(&mut self.writer).poll_shutdown(cx)
     }
 }
@@ -404,14 +401,12 @@ impl Service<Uri> for StdioConnector {
     fn call(&mut self, _uri: Uri) -> Self::Future {
         let transport = self.transport.lock().unwrap().take();
         Box::pin(async move {
-            transport
-                .map(TokioIo::new)
-                .ok_or_else(|| {
-                    std::io::Error::new(
-                        std::io::ErrorKind::BrokenPipe,
-                        "stdio transport already consumed",
-                    )
-                })
+            transport.map(TokioIo::new).ok_or_else(|| {
+                std::io::Error::new(
+                    std::io::ErrorKind::BrokenPipe,
+                    "stdio transport already consumed",
+                )
+            })
         })
     }
 }
@@ -438,7 +433,9 @@ async fn usable_port_file(path: &Path, timeout: Duration) -> Result<Option<Strin
         return Ok(None);
     }
 
-    let check_timeout = timeout.min(Duration::from_secs(1)).max(Duration::from_millis(250));
+    let check_timeout = timeout
+        .min(Duration::from_secs(1))
+        .max(Duration::from_millis(250));
     match connect_direct(&target, check_timeout, None).await {
         Ok(channel) => {
             drop(channel);
@@ -627,13 +624,14 @@ fn normalize_direct_target(target: &str) -> Result<DirectTarget> {
         let host = normalize_host(host);
         let port = uri
             .port_u16()
-            .unwrap_or(if uri.scheme_str() == Some("https") { 443 } else { 80 });
+            .unwrap_or(if uri.scheme_str() == Some("https") {
+                443
+            } else {
+                80
+            });
         return Ok(DirectTarget {
             address: format!("{host}:{port}"),
-            endpoint_uri: format!(
-                "{}://{host}:{port}",
-                uri.scheme_str().unwrap_or("http")
-            ),
+            endpoint_uri: format!("{}://{host}:{port}", uri.scheme_str().unwrap_or("http")),
         });
     }
 

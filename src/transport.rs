@@ -9,15 +9,15 @@
 //!   - `wss://<host>:<port>` — WebSocket-over-TLS URI surface
 
 use std::io;
-use std::pin::Pin;
 use std::net::SocketAddr;
+use std::pin::Pin;
 use std::task::{Context, Poll};
 
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf, Stdin, Stdout};
-#[cfg(unix)]
-use tokio::net::{TcpListener, TcpStream, UnixListener, UnixStream};
 #[cfg(not(unix))]
 use tokio::net::{TcpListener, TcpStream};
+#[cfg(unix)]
+use tokio::net::{TcpListener, TcpStream, UnixListener, UnixStream};
 
 /// Default transport URI when --listen is omitted.
 pub const DEFAULT_URI: &str = "tcp://:9090";

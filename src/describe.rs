@@ -18,7 +18,10 @@ const HOLON_META_SERVICE: &str = "holonmeta.v1.HolonMeta";
 type BoxError = Box<dyn std::error::Error>;
 
 /// Build a HolonMeta response from a holon's local proto directory and holon.yaml.
-pub fn build_response(proto_dir: impl AsRef<Path>, holon_yaml_path: impl AsRef<Path>) -> Result<DescribeResponse, BoxError> {
+pub fn build_response(
+    proto_dir: impl AsRef<Path>,
+    holon_yaml_path: impl AsRef<Path>,
+) -> Result<DescribeResponse, BoxError> {
     let identity = identity::parse_holon(holon_yaml_path.as_ref())?;
     let index = parse_proto_directory(proto_dir.as_ref())?;
 
@@ -308,8 +311,10 @@ fn parse_proto_file(path: &Path, index: &mut ProtoIndex) -> Result<(), BoxError>
                 if let Some(captures) = map_field_re().captures(line) {
                     let comment = CommentMeta::parse(&pending_comments);
                     let field_scope = scope.clone();
-                    let map_key_type = resolve_type_name(&captures[2], &package, &field_scope, index);
-                    let map_value_type = resolve_type_name(&captures[3], &package, &field_scope, index);
+                    let map_key_type =
+                        resolve_type_name(&captures[2], &package, &field_scope, index);
+                    let map_value_type =
+                        resolve_type_name(&captures[3], &package, &field_scope, index);
                     if let Some(message) = index.messages.get_mut(&key) {
                         message.fields.push(FieldDef {
                             name: captures[4].to_string(),
@@ -418,7 +423,12 @@ fn qualify_scope(scope: &[String], name: &str) -> String {
     }
 }
 
-fn resolve_type_name(type_name: &str, package: &str, scope: &[String], index: &ProtoIndex) -> String {
+fn resolve_type_name(
+    type_name: &str,
+    package: &str,
+    scope: &[String],
+    index: &ProtoIndex,
+) -> String {
     let cleaned = type_name.trim();
     if cleaned.is_empty() {
         return String::new();
@@ -456,8 +466,8 @@ fn scalar_types() -> &'static HashSet<&'static str> {
     static TYPES: OnceLock<HashSet<&'static str>> = OnceLock::new();
     TYPES.get_or_init(|| {
         HashSet::from([
-            "double", "float", "int64", "uint64", "int32", "fixed64", "fixed32", "bool",
-            "string", "bytes", "uint32", "sfixed32", "sfixed64", "sint32", "sint64",
+            "double", "float", "int64", "uint64", "int32", "fixed64", "fixed32", "bool", "string",
+            "bytes", "uint32", "sfixed32", "sfixed64", "sint32", "sint64",
         ])
     })
 }
@@ -546,7 +556,10 @@ struct MessageDef {
 
 impl MessageDef {
     fn simple_key(&self) -> String {
-        qualify_scope(&self.scope, self.full_name.rsplit('.').next().unwrap_or_default())
+        qualify_scope(
+            &self.scope,
+            self.full_name.rsplit('.').next().unwrap_or_default(),
+        )
     }
 }
 
@@ -558,7 +571,10 @@ struct EnumDef {
 
 impl EnumDef {
     fn simple_key(&self) -> String {
-        qualify_scope(&self.scope, self.full_name.rsplit('.').next().unwrap_or_default())
+        qualify_scope(
+            &self.scope,
+            self.full_name.rsplit('.').next().unwrap_or_default(),
+        )
     }
 }
 
@@ -595,7 +611,12 @@ impl FieldDef {
     }
 
     fn resolved_type(&self, index: &ProtoIndex) -> String {
-        resolve_type_name(self.r#type.as_deref().unwrap_or_default(), &self.package, &self.scope, index)
+        resolve_type_name(
+            self.r#type.as_deref().unwrap_or_default(),
+            &self.package,
+            &self.scope,
+            index,
+        )
     }
 
     fn resolved_map_value_type(&self, index: &ProtoIndex) -> String {
@@ -681,7 +702,8 @@ mod tests {
     #[test]
     fn build_response_from_echo_proto() {
         let holon = write_echo_holon();
-        let response = build_response(holon.path().join("protos"), holon.path().join("holon.yaml")).unwrap();
+        let response =
+            build_response(holon.path().join("protos"), holon.path().join("holon.yaml")).unwrap();
 
         assert_eq!(response.slug, "echo-server");
         assert_eq!(response.motto, "Reply precisely.");
@@ -699,7 +721,10 @@ mod tests {
         assert_eq!(method.name, "Ping");
         assert_eq!(method.input_type, "echo.v1.PingRequest");
         assert_eq!(method.output_type, "echo.v1.PingResponse");
-        assert_eq!(method.example_input, r#"{"message":"hello","sdk":"go-holons"}"#);
+        assert_eq!(
+            method.example_input,
+            r#"{"message":"hello","sdk":"go-holons"}"#
+        );
         assert_eq!(method.input_fields.len(), 2);
 
         let field = &method.input_fields[0];
@@ -718,7 +743,8 @@ mod tests {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         let incoming = TcpListenerStream::new(listener);
-        let service = service(holon.path().join("protos"), holon.path().join("holon.yaml")).unwrap();
+        let service =
+            service(holon.path().join("protos"), holon.path().join("holon.yaml")).unwrap();
         let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
 
         let server = tokio::spawn(async move {
@@ -733,7 +759,11 @@ mod tests {
 
         let endpoint = format!("http://{addr}");
         let mut client = HolonMetaClient::connect(endpoint).await.unwrap();
-        let response = client.describe(DescribeRequest {}).await.unwrap().into_inner();
+        let response = client
+            .describe(DescribeRequest {})
+            .await
+            .unwrap()
+            .into_inner();
 
         assert_eq!(response.slug, "echo-server");
         assert_eq!(response.services.len(), 1);
@@ -753,7 +783,8 @@ mod tests {
         )
         .unwrap();
 
-        let response = build_response(dir.path().join("protos"), dir.path().join("holon.yaml")).unwrap();
+        let response =
+            build_response(dir.path().join("protos"), dir.path().join("holon.yaml")).unwrap();
         assert_eq!(response.slug, "silent-holon");
         assert_eq!(response.motto, "Quietly available.");
         assert!(response.services.is_empty());
